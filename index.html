@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>School Inventory</title>
+<style>
+:root{color-scheme:light dark;--bg:#f3f5f1;--card:#fff;--text:#1d2420;--muted:#5f6b64;--accent:#1f6b4f;--accent-text:#fff;--line:#dde3dd;--bad:#b3392b}
+@media (prefers-color-scheme:dark){:root{--bg:#121714;--card:#1a211d;--text:#e8eee9;--muted:#9aa89f;--accent:#58c394;--accent-text:#0c1a13;--line:#2a342d;--bad:#ff8a7a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 Georgia,"Times New Roman",serif}
+h1,h2,button,input,select,label,.tab,.meta{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card)}
+h1{font-size:18px;margin:0;font-weight:700}
+main{max-width:680px;margin:0 auto;padding:12px 14px 80px}
+nav{display:flex;gap:6px;margin:8px 0 14px}
+.tab{flex:1;padding:10px;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;font-size:15px}
+.tab.on{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.row{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.row b{font-size:17px}.meta{color:var(--muted);font-size:13px}
+.qty{font:700 22px system-ui,sans-serif;min-width:44px;text-align:right}
+button{font-size:15px;padding:9px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);cursor:pointer}
+button.ghost{background:transparent;color:var(--accent)}
+input,select{width:100%;font-size:16px;padding:10px;margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
+label{font-size:13px;color:var(--muted)}
+details{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:12px}
+summary{font:600 15px system-ui,sans-serif;color:var(--accent);cursor:pointer}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);width:min(92vw,420px)}
+#login{max-width:360px;margin:12vh auto;padding:0 16px}
+.err{color:var(--bad);font:14px system-ui,sans-serif;min-height:20px}
+.empty{color:var(--muted);text-align:center;padding:24px}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<section id="login" hidden>
+  <h1>School inventory</h1>
+  <p class="meta">Staff sign-in</p>
+  <label>Email</label><input id="em" type="email" autocomplete="username">
+  <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+  <div class="err" id="lerr"></div>
+  <button id="go" style="width:100%">Sign in</button>
+</section>
+
+<div id="app" hidden>
+  <header><h1>School inventory</h1><button class="ghost" id="out">Sign out</button></header>
+  <main>
+    <nav>
+      <button class="tab on" data-t="items">Items</button>
+      <button class="tab" data-t="students">Students</button>
+      <button class="tab" data-t="loans">Loans</button>
+    </nav>
+    <div class="err" id="gerr"></div>
+
+    <div id="items">
+      <details><summary>Add item</summary><div style="margin-top:10px">
+        <label>Name</label><input id="i_name">
+        <label>Category</label><input id="i_cat" placeholder="Electronics, Furniture...">
+        <label>Quantity</label><input id="i_qty" type="number" min="0" inputmode="numeric">
+        <label>Condition</label><select id="i_cond"><option>good</option><option>fair</option><option>damaged</option></select>
+        <label>Location</label><input id="i_loc">
+        <label>Notes</label><input id="i_notes">
+        <button id="i_save">Save item</button>
+      </div></details>
+      <div id="itemList"></div>
+    </div>
+
+    <div id="students" hidden>
+      <details><summary>Add student</summary><div style="margin-top:10px">
+        <label>Admission number</label><input id="s_id">
+        <label>Name</label><input id="s_name">
+        <label>Class</label><input id="s_class">
+        <label>Guardian phone</label><input id="s_ph" type="tel">
+        <button id="s_save">Save student</button>
+      </div></details>
+      <div id="studentList"></div>
+    </div>
+
+    <div id="loans" hidden><div id="loanList"></div></div>
+  </main>
+</div>
+
+<dialog id="lend">
+  <h2 style="margin-top:0" id="lendTitle">Lend item</h2>
+  <label>Student</label><select id="l_stu"></select>
+  <label>Quantity</label><input id="l_qty" type="number" min="1" value="1" inputmode="numeric">
+  <label>Due date</label><input id="l_due" type="date">
+  <div class="err" id="l_err"></div>
+  <div style="display:flex;gap:8px"><button id="l_ok">Lend item</button><button class="ghost" id="l_cancel">Cancel</button></div>
+</dialog>
+
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signOut} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,collection,doc,onSnapshot,setDoc,query,orderBy,runTransaction,serverTimestamp,Timestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// PASTE YOUR FIREBASE CONFIG HERE (Project settings > Your apps > Web app)
+const firebaseConfig = {
+  apiKey: "PASTE_API_KEY",
+  authDomain: "school-inventory-254.firebaseapp.com",
+  projectId: "school-inventory-254",
+  appId: "PASTE_APP_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = t => t?.toDate ? t.toDate().toLocaleDateString() : "";
+const fail = e => { $("gerr").textContent = e.code === "permission-denied" ? "Access denied. Check that your email has a staff document with the same ID." : e.message; };
+
+let items = [], students = [], unsubs = [], lendItem = null;
+
+onAuthStateChanged(auth, user => {
+  unsubs.forEach(u => u()); unsubs = [];
+  $("login").hidden = !!user; $("app").hidden = !user;
+  if (!user) return;
+  $("gerr").textContent = "";
+  unsubs.push(onSnapshot(collection(db,"inventory"), s => { items = s.docs.map(d => ({id:d.id,...d.data()})); renderItems(); }, fail));
+  unsubs.push(onSnapshot(collection(db,"students"), s => { students = s.docs.map(d => ({id:d.id,...d.data()})); renderStudents(); }, fail));
+  unsubs.push(onSnapshot(query(collection(db,"loans"), orderBy("dateIssued","desc")), s => renderLoans(s.docs.map(d => ({id:d.id,...d.data()}))), fail));
+});
+
+$("go").onclick = async () => {
+  $("lerr").textContent = "";
+  try { await signInWithEmailAndPassword(auth, $("em").value.trim().toLowerCase(), $("pw").value); }
+  catch { $("lerr").textContent = "Wrong email or password."; }
+};
+$("out").onclick = () => signOut(auth);
+
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+  ["items","students","loans"].forEach(t => $(t).hidden = t !== b.dataset.t);
+});
+
+function renderItems() {
+  $("itemList").innerHTML = items.length ? items.sort((a,b) => (a.name||"").localeCompare(b.name||"")).map(i => `
+    <div class="row"><div><b>${esc(i.name)}</b><div class="meta">${esc(i.category)} · ${esc(i.location)} · ${esc(i.condition)}</div></div>
+    <div style="text-align:right"><div class="qty">${esc(i.quantity)}</div><button data-lend="${esc(i.id)}">Lend</button></div></div>`).join("")
+    : `<div class="empty">No items yet. Tap Add item to start.</div>`;
+  document.querySelectorAll("[data-lend]").forEach(b => b.onclick = () => openLend(b.dataset.lend));
+}
+function renderStudents() {
+  $("studentList").innerHTML = students.length ? students.map(s => `
+    <div class="row"><div><b>${esc(s.name)}</b><div class="meta">${esc(s.id)} · ${esc(s.class)} · ${esc(s.guardianPhone)}</div></div></div>`).join("")
+    : `<div class="empty">No students yet. Tap Add student to start.</div>`;
+}
+function renderLoans(loans) {
+  $("loanList").innerHTML = loans.length ? loans.map(l => `
+    <div class="row"><div><b>${esc(l.itemName)} × ${esc(l.quantity)}</b>
+    <div class="meta">${esc(l.studentName)} (${esc(l.studentId)})<br>Issued ${fmt(l.dateIssued)} · Due ${fmt(l.dueDate)}${l.status==="returned" ? " · Returned "+fmt(l.returnDate) : ""}</div></div>
+    ${l.status==="issued" ? `<button data-ret="${esc(l.id)}">Return</button>` : `<span class="meta">Returned</span>`}</div>`).join("")
+    : `<div class="empty">No loans recorded yet.</div>`;
+  document.querySelectorAll("[data-ret]").forEach(b => b.onclick = () => returnLoan(b.dataset.ret));
+}
+
+$("i_save").onclick = async () => {
+  const name = $("i_name").value.trim();
+  if (!name) return fail({message:"Enter an item name."});
+  try {
+    await setDoc(doc(collection(db,"inventory")), {
+      name, category:$("i_cat").value.trim(), quantity:Number($("i_qty").value)||0,
+      condition:$("i_cond").value, location:$("i_loc").value.trim(), notes:$("i_notes").value.trim(),
+      dateAdded:serverTimestamp()
+    });
+    ["i_name","i_cat","i_qty","i_loc","i_notes"].forEach(id => $(id).value = "");
+    $("gerr").textContent = "";
+  } catch(e) { fail(e); }
+};
+
+$("s_save").onclick = async () => {
+  const id = $("s_id").value.trim();
+  if (!id || id.includes("/")) return fail({message:"Enter an admission number without slashes."});
+  try {
+    await setDoc(doc(db,"students",id), {name:$("s_name").value.trim(), class:$("s_class").value.trim(), guardianPhone:$("s_ph").value.trim()});
+    ["s_id","s_name","s_class","s_ph"].forEach(x => $(x).value = "");
+    $("gerr").textContent = "";
+  } catch(e) { fail(e); }
+};
+
+function openLend(id) {
+  lendItem = items.find(i => i.id === id);
+  $("lendTitle").textContent = "Lend " + lendItem.name;
+  $("l_stu").innerHTML = students.length ? students.map(s => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.id)})</option>`).join("") : `<option value="">Add a student first</option>`;
+  const d = new Date(); d.setDate(d.getDate()+7);
+  $("l_due").value = d.toISOString().slice(0,10);
+  $("l_qty").value = 1; $("l_err").textContent = "";
+  $("lend").showModal();
+}
+$("l_cancel").onclick = () => $("lend").close();
+$("l_ok").onclick = async () => {
+  const stu = students.find(s => s.id === $("l_stu").value);
+  const qty = Number($("l_qty").value);
+  if (!stu) return $("l_err").textContent = "Choose a student.";
+  if (!(qty > 0)) return $("l_err").textContent = "Enter a quantity of 1 or more.";
+  try {
+    await runTransaction(db, async t => {
+      const iref = doc(db,"inventory",lendItem.id);
+      const snap = await t.get(iref);
+      const have = Number(snap.data().quantity);
+      if (have < qty) throw new Error("Only " + have + " in stock.");
+      t.update(iref, {quantity: have - qty});
+      t.set(doc(collection(db,"loans")), {
+        studentId:stu.id, studentName:stu.name, itemId:lendItem.id, itemName:lendItem.name, quantity:qty,
+        dateIssued:serverTimestamp(), dueDate:Timestamp.fromDate(new Date($("l_due").value)),
+        status:"issued", issuedBy:auth.currentUser.email
+      });
+    });
+    $("lend").close();
+  } catch(e) { $("l_err").textContent = e.message; }
+};
+
+async function returnLoan(id) {
+  try {
+    await runTransaction(db, async t => {
+      const lref = doc(db,"loans",id);
+      const l = await t.get(lref);
+      if (l.data().status !== "issued") throw new Error("Already returned.");
+      const iref = doc(db,"inventory",l.data().itemId);
+      const i = await t.get(iref);
+      t.update(iref, {quantity: Number(i.data().quantity) + Number(l.data().quantity)});
+      t.update(lref, {status:"returned", returnDate:serverTimestamp()});
+    });
+  } catch(e) { fail(e); }
+}
+</script>
+</body>
+</html>
